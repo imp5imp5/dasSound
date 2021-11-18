@@ -24,11 +24,13 @@ IF (NOT DAS_SOUND_INCLUDED)
 
 	SETUP_CPP11(libDasModuleSound)
 
+    ADD_MODULE_DAS(media media dasbox_sound_utils)
 
 	# SOUND AOT
 	add_custom_target(SOUND_AOT)
 	SET(SOUND_GENERATED_SRC)
-	DAS_AOT("${DAS_SOUND_DIR}/examples/sound_example.das" SOUND_GENERATED_SRC SOUND_AOT daScript)
+	DAS_AOT("${DAS_SOUND_DIR}/media/dasbox_sound_utils.das" SOUND_GENERATED_SRC SOUND_AOT daScript)
+  DAS_AOT("${DAS_SOUND_DIR}/examples/sound_example.das" SOUND_GENERATED_SRC SOUND_AOT daScript)
 
 	# daslib
 	DAS_AOT("daslib/random.das" SOUND_GENERATED_SRC SOUND_AOT daScript)
