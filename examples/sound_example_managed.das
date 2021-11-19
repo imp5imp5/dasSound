@@ -1,5 +1,5 @@
 require sound
-require media/dasbox_sound_utils
+require medialib/dasbox_sound_utils
 require math
 require fio
 
