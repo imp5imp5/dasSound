@@ -14,6 +14,9 @@
 #include <mutex>
 #include <array>
 
+#ifndef _MSC_VER
+#define stricmp strcasecmp
+#endif
 
 MAKE_TYPE_FACTORY(PlayingSoundHandle, das::sound::PlayingSoundHandle)
 MAKE_TYPE_FACTORY(PcmSound, das::sound::PcmSound)
@@ -1347,7 +1350,7 @@ public:
         addAnnotation(das::make_smart<PcmSoundAnnotation>(lib));
         addCtorAndUsing<sound::PcmSound>(*this, lib, "PcmSound", "sound::PcmSound");
 
-  
+
         addExtern<DAS_BIND_FUN(sound::initialize)>(*this, lib,
           "sound_initialize", SideEffects::modifyExternal, "sound::initialize");
 
