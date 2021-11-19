@@ -127,7 +127,7 @@ int get_playing_sound_count()
 
 void PcmSound::newData(size_t size)
 {
-  memoryUsed = size;
+  memoryUsed = unsigned(size);
   data = new float[(size + 3) / sizeof(float)];
   sound_data_pointers.insert(data);
   memory_used += memoryUsed;
@@ -243,6 +243,7 @@ struct PlayingSound
 
   void mixTo(float * __restrict mix, int count, int frequency, double inv_frequency, double buffer_time)
   {
+    G_UNUSED(frequency);
     float wishVolumeL = master_volume * volume * min(1.0f + pan, 1.0f);
     float wishVolumeR = master_volume * volume * min(1.0f - pan, 1.0f);
     float * __restrict sndData = sound ? sound->getData() : nullptr;
@@ -479,7 +480,7 @@ static int allocate_playing_sound()
 static bool is_handle_valid(PlayingSoundHandle ps)
 {
   unsigned idx = ps.handle & PLAYING_SOUNDS_MASK;
-  return (playing_sounds[idx].version == (ps.handle & (~PLAYING_SOUNDS_MASK))) && idx > 0;
+  return (playing_sounds[idx].version == int(ps.handle & (~PLAYING_SOUNDS_MASK))) && idx > 0;
 }
 
 static int handle_to_index(PlayingSoundHandle ps)
@@ -555,6 +556,7 @@ static ma_context context = { 0 };
 void on_error_log(void * user_data, ma_uint32 level, const char * message)
 {
   G_UNUSED(user_data);
+  G_UNUSED(level);
 /*  if (level <= 1)
     print_error("%s", message);
   else
