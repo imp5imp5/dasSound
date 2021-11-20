@@ -557,12 +557,10 @@ void on_error_log(void * user_data, ma_uint32 level, const char * message)
 {
   G_UNUSED(user_data);
   G_UNUSED(level);
-/*  if (level <= 1)
-    print_error("%s", message);
+  if (level <= 1)
+    LOG(LogLevel::error) << message;
   else
-    print_note("%s", message);
-    */
-  printf("%s\n", message);
+    LOG() << message;
 }
 
 static void miniaudio_data_callback(ma_device* p_device, void* p_output, const void* p_input, ma_uint32 frame_count)
@@ -600,18 +598,15 @@ void init_sound_lib_internal()
 
   if (ma_device_init(&context, &deviceConfig, &miniaudio_device) != MA_SUCCESS)
   {
-    //print_error("SOUND: Failed to open playback device");
-    printf("SOUND: Failed to open playback device\n");
+    LOG(LogLevel::error) << "SOUND: Failed to open playback device";
     return;
   }
 
-  //print_note("Sound device name: %s", miniaudio_device.playback.name);
-  printf("Sound device name: %s\n", miniaudio_device.playback.name);
+  LOG() << "Sound device name: " << miniaudio_device.playback.name;
 
   if (ma_device_start(&miniaudio_device) != MA_SUCCESS)
   {
-    //print_error("SOUND: Failed to start playback device");
-    printf("SOUND: Failed to start playback device\n");
+    LOG(LogLevel::error) << "SOUND: Failed to start playback device";
     ma_device_uninit(&miniaudio_device);
     return;
   }
@@ -623,8 +618,7 @@ void print_debug_infos(int from_frame)
 {
   for (auto && dbg : dbg_pointers)
     if (dbg && dbg->creationFrame >= from_frame)
-      printf("  sound: %s\n", dbg->name);
-//      print_text("  sound: %s\n", dbg->name);
+      LOG() << "  sound: " << dbg->name;
 }
 
 void initialize()
@@ -695,15 +689,14 @@ PcmSound create_sound_from_file(const char * file_name)
 
   if (!file_name || !file_name[0])
   {
-    //print_error("Cannot create sound. File name is empty. '%s'", file_name);
-    printf("Cannot create sound. File name is empty. '%s'\n", file_name);
+    LOG(LogLevel::error) << "Cannot create sound. File name is empty. '" << file_name << "'";
     return PcmSound();
   }
 
 /*
   if (!fs::is_path_string_valid(file_name))
   {
-    print_error("Cannot open sound '%s'. Absolute paths or access to the parent directory is prohibited.", file_name);
+    LOG(LogLevel::error) << "Cannot open sound '" << file_name << "'. Absolute paths or access to the parent directory is prohibited.";
     return PcmSound();
   }
   */
@@ -729,22 +722,19 @@ PcmSound create_sound_from_file(const char * file_name)
     pSampleData = drwav_open_file_and_read_pcm_frames_f32(file_name, &channels, &sampleRate, &totalPCMFrameCount, nullptr);
   else
   {
-    //print_error("Cannot create sound from '%s', unrecognized file format. Expected .wav, .flac or .mp3", file_name);
-    printf("Cannot create sound from '%s', unrecognized file format. Expected .wav, .flac or .mp3\n", file_name);
+    LOG(LogLevel::error) << "Cannot create sound from '" << file_name << "', unrecognized file format. Expected .wav, .flac or .mp3";
     return PcmSound();
   }
 
   if (!pSampleData)
   {
-//    print_error("Cannot create sound from '%s'", file_name);
-    printf("Cannot create sound from '%s'\n", file_name);
+    LOG(LogLevel::error) << "Cannot create sound from '" << file_name << "'";
     return PcmSound();
   }
 
   if (channels != 1 && channels != 2)
   {
- //   print_error("Cannot create sound from '%s', invalid channels count = %d", int(channels));
-    printf("Cannot create sound from '%s', invalid channels count = %d\n", file_name, int(channels));
+    LOG(LogLevel::error) << "Cannot create sound from '" << file_name << "', invalid channels count =" << int(channels);
     return PcmSound();
   }
 
