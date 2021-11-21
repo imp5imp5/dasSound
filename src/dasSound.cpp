@@ -11,7 +11,6 @@
 
 #define MINIAUDIO_IMPLEMENTATION
 #include <miniaudio.h>
-#include <mutex>
 #include <array>
 
 #ifndef _MSC_VER
