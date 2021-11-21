@@ -550,7 +550,7 @@ static void fill_buffer_cb(float * __restrict out_buf, int frequency, int channe
 static ma_device miniaudio_device;
 static volatile bool device_initialized = false;
 static ma_log ma_log_struct = { 0 };
-static ma_context context = { 0 };
+static ma_context audio_context = { 0 };
 
 
 void on_error_log(void * user_data, ma_uint32 level, const char * message)
@@ -584,8 +584,8 @@ void init_sound_lib_internal()
   ma_log_init(nullptr, &ma_log_struct);
   ma_log_register_callback(&ma_log_struct, {on_error_log, nullptr});
 
-  ma_context_init(NULL, 0, NULL, &context);
-  context.pLog = &ma_log_struct;
+  ma_context_init(NULL, 0, NULL, &audio_context);
+  audio_context.pLog = &ma_log_struct;
 
   ma_device_config deviceConfig;
 
@@ -596,7 +596,7 @@ void init_sound_lib_internal()
   deviceConfig.dataCallback = miniaudio_data_callback;
   deviceConfig.pUserData = nullptr;
 
-  if (ma_device_init(&context, &deviceConfig, &miniaudio_device) != MA_SUCCESS)
+  if (ma_device_init(&audio_context, &deviceConfig, &miniaudio_device) != MA_SUCCESS)
   {
     LOG(LogLevel::error) << "SOUND: Failed to open playback device";
     return;
