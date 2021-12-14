@@ -559,7 +559,7 @@ void on_error_log(void * user_data, ma_uint32 level, const char * message)
   if (level <= 1)
     LOG(LogLevel::error) << message;
   else
-    LOG() << message;
+    LOG(LogLevel::info) << message;
 }
 
 static void miniaudio_data_callback(ma_device* p_device, void* p_output, const void* p_input, ma_uint32 frame_count)
