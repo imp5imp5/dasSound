@@ -1268,7 +1268,7 @@ struct SimNode_DeletePcmSound : SimNode_Delete
     V_END();
   }
 
-  virtual vec4f eval(Context & context) override
+  virtual vec4f DAS_EVAL_ABI eval(Context & context) override
   {
     DAS_PROFILE_NODE
       auto pH = (sound::PcmSound *)subexpr->evalPtr(context);
