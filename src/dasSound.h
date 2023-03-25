@@ -122,4 +122,6 @@ namespace sound
   void print_debug_infos(int from_frame);
 }
 
+template <> struct WrapType<sound::PlayingSoundHandle> { enum { value = false }; typedef uint32_t type; };
+
 }

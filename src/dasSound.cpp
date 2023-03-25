@@ -1310,7 +1310,7 @@ struct PcmSoundAnnotation : ManagedStructureAnnotation<sound::PcmSound, true, tr
 
 struct PlayingSoundHandleAnnotation final: ManagedValueAnnotation<sound::PlayingSoundHandle>
 {
-  PlayingSoundHandleAnnotation() : ManagedValueAnnotation("PlayingSoundHandle", "das::sound::PlayingSoundHandle")
+  PlayingSoundHandleAnnotation(ModuleLibrary & mlib) : ManagedValueAnnotation(mlib, "PlayingSoundHandle", "das::sound::PlayingSoundHandle")
   {
   }
 
@@ -1337,7 +1337,7 @@ public:
         lib.addModule(this);
         lib.addBuiltInModule();
 
-        addAnnotation(das::make_smart<PlayingSoundHandleAnnotation>());
+        addAnnotation(das::make_smart<PlayingSoundHandleAnnotation>(lib));
         addAnnotation(das::make_smart<PcmSoundAnnotation>(lib));
         addCtorAndUsing<sound::PcmSound>(*this, lib, "PcmSound", "sound::PcmSound");
 
