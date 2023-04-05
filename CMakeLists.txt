@@ -52,4 +52,17 @@ IF ((NOT DAS_SOUND_INCLUDED) AND ((NOT ${DAS_SOUND_DISABLED}) OR (NOT DEFINED DA
 	SETUP_LTO(soundAot)
 	ADD_EXAMPLE(soundAot)
 
+    install(DIRECTORY ${PROJECT_SOURCE_DIR}/modules/dasSound/medialib
+        DESTINATION modules/dasSound
+        FILES_MATCHING
+        PATTERN "*.das"
+    )
+
+    file(GLOB DAS_SOUND_EXAMPLES
+        ${PROJECT_SOURCE_DIR}/modules/dasSound/examples/*.das
+    )
+    install(FILES ${DAS_SOUND_EXAMPLES}
+        DESTINATION examples/sound
+    )
+
 ENDIF()
