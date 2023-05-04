@@ -8,6 +8,7 @@
 #include "daScript/simulate/interop.h"
 #include "daScript/simulate/simulate_visit_op.h"
 
+#include <opl3.h>
 
 #define MINIAUDIO_IMPLEMENTATION
 #include <miniaudio.h>
@@ -20,6 +21,7 @@
 MAKE_TYPE_FACTORY(PlayingSoundHandle, das::sound::PlayingSoundHandle)
 MAKE_TYPE_FACTORY(PcmSound, das::sound::PcmSound)
 
+MAKE_TYPE_FACTORY(Opl3Chip, opl3_chip)
 
 
 namespace das {
@@ -1328,7 +1330,10 @@ struct PlayingSoundHandleAnnotation final: ManagedValueAnnotation<sound::Playing
   virtual bool canBePlacedInContainer() const override { return true; }
 };
 
-
+struct Opl3ChipAnnotation : ManagedStructureAnnotation<opl3_chip> {
+    Opl3ChipAnnotation ( ModuleLibrary & mlib ) : ManagedStructureAnnotation("Opl3Chip", mlib, "opl3_chip") {
+    }
+};
 
 class Module_Sound : public das::Module {
 public:
@@ -1337,10 +1342,30 @@ public:
         lib.addModule(this);
         lib.addBuiltInModule();
 
+        // opl3
+        addAnnotation(make_smart<Opl3ChipAnnotation>(lib));
+        addExtern<DAS_BIND_FUN(OPL3_Generate)>(*this, lib, "OPL3_Generate",
+            SideEffects::worstDefault, "OPL3_Generate")->args({"chip", "buf"});
+        addExtern<DAS_BIND_FUN(OPL3_GenerateResampled)>(*this, lib, "OPL3_GenerateResampled",
+            SideEffects::worstDefault, "OPL3_GenerateResampled")->args({"chip", "buf"});
+        addExtern<DAS_BIND_FUN(OPL3_Reset)>(*this, lib, "OPL3_Reset",
+            SideEffects::worstDefault, "OPL3_Reset")->args({"chip", "sampleRate"});
+        addExtern<DAS_BIND_FUN(OPL3_WriteReg)>(*this, lib, "OPL3_WriteReg",
+            SideEffects::worstDefault, "OPL3_WriteReg")->args({"chip", "reg", "v"});
+        addExtern<DAS_BIND_FUN(OPL3_WriteRegBuffered)>(*this, lib, "OPL3_WriteRegBuffered",
+            SideEffects::worstDefault, "OPL3_WriteRegBuffered")->args({"chip", "reg", "v"});
+        addExtern<DAS_BIND_FUN(OPL3_GenerateStream)>(*this, lib, "OPL3_GenerateStream",
+            SideEffects::worstDefault, "OPL3_GenerateStream")->args({"OPL3_GenerateStream", "sndptr", "numsamples"});
+        addExtern<DAS_BIND_FUN(OPL3_Generate4Ch)>(*this, lib, "OPL3_Generate4Ch",
+            SideEffects::worstDefault, "OPL3_Generate4Ch")->args({"chip", "buf"});
+        addExtern<DAS_BIND_FUN(OPL3_Generate4ChResampled)>(*this, lib, "OPL3_Generate4ChResampled",
+            SideEffects::worstDefault, "OPL3_Generate4ChResampled")->args({"chip", "buf"});
+        addExtern<DAS_BIND_FUN(OPL3_Generate4ChStream)>(*this, lib, "OPL3_Generate4ChStream",
+            SideEffects::worstDefault, "OPL3_Generate4ChStream")->args({"chip", "sndptr1", "sndptr2", "numsamples"});
+
         addAnnotation(das::make_smart<PlayingSoundHandleAnnotation>(lib));
         addAnnotation(das::make_smart<PcmSoundAnnotation>(lib));
         addCtorAndUsing<sound::PcmSound>(*this, lib, "PcmSound", "sound::PcmSound");
-
 
         addExtern<DAS_BIND_FUN(sound::initialize)>(*this, lib,
           "sound_initialize", SideEffects::modifyExternal, "sound::initialize");
