@@ -32,11 +32,13 @@ IF ((NOT DAS_SOUND_INCLUDED) AND ((NOT ${DAS_SOUND_DISABLED}) OR (NOT DEFINED DA
 	SETUP_CPP11(libDasModuleSound)
 
     ADD_MODULE_DAS(medialib medialib dasbox_sound_utils)
+	ADD_MODULE_DAS(medialib medialib opl3)
 
 	# SOUND AOT
 	add_custom_target(SOUND_AOT)
 	SET(SOUND_GENERATED_SRC)
 	DAS_AOT("${DAS_SOUND_DIR}/medialib/dasbox_sound_utils.das" SOUND_GENERATED_SRC SOUND_AOT daScript)
+	DAS_AOT("${DAS_SOUND_DIR}/medialib/opl3.das" SOUND_GENERATED_SRC SOUND_AOT daScript)
 	DAS_AOT("${DAS_SOUND_DIR}/examples/sound_example.das" SOUND_GENERATED_SRC SOUND_AOT daScript)
 
 	# daslib
