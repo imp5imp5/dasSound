@@ -1,9 +1,11 @@
+options persistent_heap
+
 require sound
 require math
 require fio
 require rtti
 
-let MA_SAMPLE_RATE = 48000
+let MA_SAMPLE_RATE = 44100
 let MA_CHANNELS = 2
 
 class AudioSource
@@ -19,6 +21,8 @@ class AudioChannel
     source : AudioSource?
     resampler : ma_resampler
     channel_converter : ma_channel_converter
+    volume_mixer : ma_volume_mixer
+    playback_position : uint64 = 0ul
     def AudioChannel ( src:AudioSource? )
         source = src
         // resampler
@@ -40,9 +44,12 @@ class AudioChannel
             ma_channel_mix_mode ma_channel_mix_mode_default
         )
         ma_channel_converter_init(unsafe(addr(channel_converter_config)), unsafe(addr(channel_converter)))
+        // volume mixer
+        ma_volume_mixer_init(unsafe(addr(volume_mixer)),1u)
     def finalize
         unsafe
             delete source
+        ma_volume_mixer_uninit(unsafe(addr(volume_mixer)))
         ma_channel_converter_uninit(unsafe(addr(channel_converter)))
         ma_resampler_uninit(unsafe(addr(resampler)))
     def mix ( var data:array<float>#; channels,rate:int; dt:float ) : bool
@@ -52,29 +59,39 @@ class AudioChannel
         ma_resampler_set_rate(unsafe(addr(resampler)), inputRate, uint(rate))
         var outputSamples = uint64(data|>length/channels)
         var inputSamples = ma_resampler_get_required_input_frame_count(unsafe(addr(resampler)), outputSamples)
-        var samples : array<float>
+        var samples <- source->get_samples(int(inputSamples))
+        if length(samples) < int(inputSamples)
+            samples |> resize(int(inputSamples))
         if inputSamples != outputSamples
             // resample
-            samples |> resize(int(outputSamples))
-            var temp <- source->get_samples(int(inputSamples))
-            if length(temp) < int(inputSamples)
-                temp |> resize(int(inputSamples))    // fill up with 0.
+            var temp : array<float>
+            temp |> resize(int(outputSamples))
             ma_resampler_process_pcm_frames(unsafe(addr(resampler)),
-                unsafe(addr(temp[0])),
-                unsafe(addr(inputSamples)),
                 unsafe(addr(samples[0])),
+                unsafe(addr(inputSamples)),
+                unsafe(addr(temp[0])),
                 unsafe(addr(outputSamples)))
-            delete temp
-        else
-            // fill samples directly
-            samples <- source->get_samples(int(inputSamples))
+            delete samples
+            samples <- temp
         // convert channels
+        var channel_data : array<float>
+        channel_data |> resize(data |> length)
         ma_channel_converter_process_pcm_frames(unsafe(addr(channel_converter)),
-            unsafe(addr(data[0])),
+            unsafe(addr(channel_data[0])),
             unsafe(addr(samples[0])),
             outputSamples)
         unsafe
             delete samples
+        // apply volume envelope
+        ma_volume_mixer_set_channels(unsafe(addr(volume_mixer)), uint(channels))
+        ma_volume_mixer_process_pcm_frames(
+            unsafe(addr(volume_mixer)),
+            unsafe(addr(channel_data[0])),
+            unsafe(addr(data[0])),
+            outputSamples)
+        delete channel_data
+        // update position
+        playback_position += inputSamples
         return true
 
 class AudioChannel2D : AudioChannel
@@ -126,7 +143,8 @@ def mixer ( var data:array<float>#; channels,rate:int; dt:float )
 [init]
 def initialize_mixer
     if this_context().category.audio
-        var monoGen = new AudioSourceMonoGenerator(gen_sine_wave(440.,6000),6000)
+        let factor = 8
+        var monoGen = new AudioSourceMonoGenerator(gen_sine_wave(440.,44100/factor),44100/factor)
         var channel = new AudioChannel(monoGen)
         g_channels |> push(channel)
 

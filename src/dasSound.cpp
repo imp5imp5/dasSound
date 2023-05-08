@@ -12,6 +12,7 @@
 
 #define MINIAUDIO_IMPLEMENTATION
 #include <miniaudio.h>
+#include <volume_mixer.h>
 
 MAKE_TYPE_FACTORY(Opl3Chip,opl3_chip)
 MAKE_EXTERNAL_TYPE_FACTORY(Context,Context);
@@ -23,6 +24,8 @@ MAKE_TYPE_FACTORY(ma_resampler,ma_resampler);
 
 MAKE_TYPE_FACTORY(ma_channel_converter_config,ma_channel_converter_config);
 MAKE_TYPE_FACTORY(ma_channel_converter,ma_channel_converter);
+
+MAKE_TYPE_FACTORY(ma_volume_mixer,ma_volume_mixer);
 
 DAS_BASE_BIND_ENUM ( ma_format, ma_format, \
     ma_format_unknown, \
@@ -161,6 +164,16 @@ struct MAChannelConverterAnnotation : ManagedStructureAnnotation<ma_channel_conv
     }
 };
 
+struct MAVolumeMixerAnnotation : ManagedStructureAnnotation<ma_volume_mixer> {
+    MAVolumeMixerAnnotation ( ModuleLibrary & mlib )
+        : ManagedStructureAnnotation("ma_volume_mixer", mlib, "ma_volume_mixer") {
+        addField<DAS_BIND_MANAGED_FIELD(volume)>("volume","volume");
+        addField<DAS_BIND_MANAGED_FIELD(dvolume)>("dvolume","dvolume");
+        addField<DAS_BIND_MANAGED_FIELD(tvolume)>("tvolume","tvolume");
+        addField<DAS_BIND_MANAGED_FIELD(nChannels)>("channels","nChannels");
+    }
+};
+
 class Module_Sound : public das::Module {
 protected:
     bool initialized = false;
@@ -238,10 +251,26 @@ public:
             SideEffects::modifyArgumentAndExternal, "ma_channel_converter_uninit")->args({"converter"});
         addExtern<DAS_BIND_FUN(ma_channel_converter_process_pcm_frames)>(*this, lib, "ma_channel_converter_process_pcm_frames",
             SideEffects::modifyArgument, "ma_channel_converter_process_pcm_frames")->args({"converter", "pFramesOut", "pFramesIn", "frameCount"});
+        // volume mixer
+        addAnnotation(make_smart<MAVolumeMixerAnnotation>(lib));
+        addExtern<DAS_BIND_FUN(ma_volume_mixer_init)>(*this, lib, "ma_volume_mixer_init",
+            SideEffects::modifyArgument, "ma_volume_mixer_init")->args({"mixer","nChannels"});
+        addExtern<DAS_BIND_FUN(ma_volume_mixer_uninit)>(*this, lib, "ma_volume_mixer_uninit",
+            SideEffects::modifyArgument, "ma_volume_mixer_uninit")->args({"mixer"});
+        addExtern<DAS_BIND_FUN(ma_volume_mixer_set_channels)>(*this, lib, "ma_volume_mixer_set_channels",
+            SideEffects::modifyArgument, "ma_volume_mixer_set_channels")->args({"mixer","nChannels"});
+        addExtern<DAS_BIND_FUN(ma_volume_mixer_set_volume)>(*this, lib, "ma_volume_mixer_set_volume",
+            SideEffects::modifyArgument, "ma_volume_mixer_set_volume")->args({"mixer", "volume"});
+        addExtern<DAS_BIND_FUN(ma_volume_mixer_set_volume_over_time)>(*this, lib, "ma_volume_mixer_set_volume_over_time",
+            SideEffects::modifyArgument, "ma_volume_mixer_set_volume_over_time")->args({"mixer", "volume", "nFrames"});
+        addExtern<DAS_BIND_FUN(ma_volume_mixer_process_pcm_frames)>(*this, lib, "ma_volume_mixer_process_pcm_frames",
+            SideEffects::modifyArgument, "ma_volume_mixer_process_pcm_frames")->args({"mixer", "pFramesOut", "pFramesIn", "frameCount"});
         return true;
     }
     virtual ModuleAotType aotRequire ( TextWriter & tw ) const override {
         tw << "#include \"../modules/dasSound/src/dasSound.h\"\n";
+        tw << "#include <miniaudio.h>\n";
+        tw << "#include <volume_mixer.h>\n";
         return ModuleAotType::cpp;
     }
 };
