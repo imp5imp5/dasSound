@@ -121,6 +121,32 @@ class AudioSourceMonoGenerator : AudioSource
             i ++
         return <- data
 
+let MA_RESULT_OK = 0
+
+class AudioSourceDecoderFromFile : AudioSource
+    decoder : ma_decoder
+    isReady : bool = false
+    def AudioSourceDecoderFromFile ( filename:string; rate,channels:int)
+        var config <- ma_decoder_config_init(ma_format ma_format_f32, uint(channels), uint(rate))
+        let result = ma_decoder_init_file(filename, unsafe(addr(config)), unsafe(addr(decoder)))
+        if result == MA_RESULT_OK
+            isReady = true
+        else
+            to_log(LOG_ERROR, "failed to load audio file {filename} with error code {result}\n")
+    def finalize
+        ma_decoder_uninit(unsafe(addr(decoder)))
+    def override ready : bool
+        return isReady
+    def override get_samples ( nsamples:int ) : array<float>
+        var samples : array<float>
+        if isReady
+            samples |> resize(nsamples)
+            let nframes = ma_decoder_read_pcm_frames(
+                unsafe(addr(decoder)),
+                unsafe(addr(samples[0])),
+                uint64(nsamples))
+        return <- samples
+
 def remove_channel ( srci:int )
     unsafe
         delete g_channels[srci]
@@ -143,10 +169,17 @@ def mixer ( var data:array<float>#; channels,rate:int; dt:float )
 [init]
 def initialize_mixer
     if this_context().category.audio
-        let factor = 8
-        var monoGen = new AudioSourceMonoGenerator(gen_sine_wave(440.,44100/factor),44100/factor)
-        var channel = new AudioChannel(monoGen)
-        g_channels |> push(channel)
+        static_if false
+            let factor = 8  // testing generator
+            var monoGen = new AudioSourceMonoGenerator(gen_sine_wave(440.,44100/factor),44100/factor)
+            var channel = new AudioChannel(monoGen)
+            g_channels |> push(channel)
+        static_if true
+            var channel = new AudioChannel(new AudioSourceDecoderFromFile("test.mp3",44100,2))
+            g_channels |> push(channel)
+        static_if true
+            var channel = new AudioChannel(new AudioSourceDecoderFromFile("test.wav",44100,2))
+            g_channels |> push(channel)
 
 [finalize]
 def finalize_mixer
@@ -168,5 +201,5 @@ def gen_sine_wave ( freq:float; rate:int )
 [export]
 def main
     sound_initalize(@@mixer,MA_SAMPLE_RATE,MA_CHANNELS,this_context())
-    sleep(1000u)
+    sleep(3000u)
     sound_finalize()

@@ -27,6 +27,9 @@ MAKE_TYPE_FACTORY(ma_channel_converter,ma_channel_converter);
 
 MAKE_TYPE_FACTORY(ma_volume_mixer,ma_volume_mixer);
 
+MAKE_TYPE_FACTORY(ma_decoder_config,ma_decoder_config);
+MAKE_TYPE_FACTORY(ma_decoder,ma_decoder);
+
 DAS_BASE_BIND_ENUM ( ma_format, ma_format, \
     ma_format_unknown, \
     ma_format_u8, \
@@ -51,6 +54,13 @@ DAS_BASE_BIND_ENUM ( ma_channel_mix_mode, ma_channel_mix_mode, \
     ma_channel_mix_mode_default \
 );
 DAS_BIND_ENUM_CAST ( ma_channel_mix_mode );
+
+DAS_BASE_BIND_ENUM ( ma_dither_mode, ma_dither_mode, \
+    ma_dither_mode_none, \
+    ma_dither_mode_rectangle, \
+    ma_dither_mode_triangle \
+);
+DAS_BIND_ENUM_CAST ( ma_dither_mode );
 
 namespace das {
 
@@ -174,6 +184,28 @@ struct MAVolumeMixerAnnotation : ManagedStructureAnnotation<ma_volume_mixer> {
     }
 };
 
+struct MADecoderConfigAnnotation : ManagedStructureAnnotation<ma_decoder_config> {
+    MADecoderConfigAnnotation ( ModuleLibrary & mlib )
+        : ManagedStructureAnnotation("ma_decoder_config", mlib, "ma_decoder_config") {
+        addField<DAS_BIND_MANAGED_FIELD(format)>("format","format");
+        addField<DAS_BIND_MANAGED_FIELD(channels)>("channels","channels");
+        addField<DAS_BIND_MANAGED_FIELD(channelMap)>("channelMap","channelMap");
+        addField<DAS_BIND_MANAGED_FIELD(channelMixMode)>("channelMixMode","channelMixMode");
+        addField<DAS_BIND_MANAGED_FIELD(ditherMode)>("ditherMode","ditherMode");
+    }
+};
+
+struct MADecoderAnnotation : ManagedStructureAnnotation<ma_decoder> {
+    MADecoderAnnotation ( ModuleLibrary & mlib )
+        : ManagedStructureAnnotation("ma_decoder", mlib, "ma_decoder") {
+        addField<DAS_BIND_MANAGED_FIELD(outputFormat)>("outputFormat","outputFormat");
+        addField<DAS_BIND_MANAGED_FIELD(outputChannels)>("outputChannels","outputChannels");
+        addField<DAS_BIND_MANAGED_FIELD(outputSampleRate)>("outputSampleRate","outputSampleRate");
+    }
+};
+
+
+
 class Module_Sound : public das::Module {
 protected:
     bool initialized = false;
@@ -217,6 +249,7 @@ public:
         addEnumeration(make_smart<Enumerationma_format>());
         addEnumeration(make_smart<Enumerationma_resample_algorithm>());
         addEnumeration(make_smart<Enumerationma_channel_mix_mode>());
+        addEnumeration(make_smart<Enumerationma_dither_mode>());
         // resampler
         addAnnotation(make_smart<MAResamplerConfigAnnotation>(lib));
         addAnnotation(make_smart<MAResamplerAnnotation>(lib));
@@ -265,6 +298,27 @@ public:
             SideEffects::modifyArgument, "ma_volume_mixer_set_volume_over_time")->args({"mixer", "volume", "nFrames"});
         addExtern<DAS_BIND_FUN(ma_volume_mixer_process_pcm_frames)>(*this, lib, "ma_volume_mixer_process_pcm_frames",
             SideEffects::modifyArgument, "ma_volume_mixer_process_pcm_frames")->args({"mixer", "pFramesOut", "pFramesIn", "frameCount"});
+        // decoder
+        addAnnotation(make_smart<MADecoderConfigAnnotation>(lib));
+        addAnnotation(make_smart<MADecoderAnnotation>(lib));
+        addExtern<DAS_BIND_FUN(ma_decoder_config_init),SimNode_ExtFuncCallAndCopyOrMove>(*this, lib, "ma_decoder_config_init",
+            SideEffects::none, "ma_decoder_config_init")->args({"outputFormat", "outputChannels", "outputSampleRate"});
+        addExtern<DAS_BIND_FUN(ma_decoder_init_memory)>(*this, lib, "ma_decoder_init_memory",
+            SideEffects::modifyArgumentAndExternal, "ma_decoder_init_memory")->args({"pData", "dataSize", "config", "decoder"});
+        addExtern<DAS_BIND_FUN(ma_decoder_init_file)>(*this, lib, "ma_decoder_init_file",
+            SideEffects::modifyArgumentAndExternal, "ma_decoder_init_file")->args({"pFilePath", "config", "decoder"});
+        addExtern<DAS_BIND_FUN(ma_decoder_uninit)>(*this, lib, "ma_decoder_uninit",
+            SideEffects::modifyArgumentAndExternal, "ma_decoder_uninit")->args({"decoder"});
+        addExtern<DAS_BIND_FUN(ma_decoder_get_cursor_in_pcm_frames)>(*this, lib, "ma_decoder_get_cursor_in_pcm_frames",
+            SideEffects::none, "ma_decoder_get_cursor_in_pcm_frames")->args({"decoder", "pCursor"});
+        addExtern<DAS_BIND_FUN(ma_decoder_get_length_in_pcm_frames)>(*this, lib, "ma_decoder_get_length_in_pcm_frames",
+            SideEffects::none, "ma_decoder_get_length_in_pcm_frames")->args({"decoder"});
+        addExtern<DAS_BIND_FUN(ma_decoder_read_pcm_frames)>(*this, lib, "ma_decoder_read_pcm_frames",
+            SideEffects::modifyArgument, "ma_decoder_read_pcm_frames")->args({"decoder", "pFramesOut", "frameCount"});
+        addExtern<DAS_BIND_FUN(ma_decoder_seek_to_pcm_frame)>(*this, lib, "ma_decoder_seek_to_pcm_frame",
+            SideEffects::modifyArgument, "ma_decoder_seek_to_pcm_frame")->args({"decoder", "frameIndex"});
+        addExtern<DAS_BIND_FUN(ma_decoder_get_available_frames)>(*this, lib, "ma_decoder_get_available_frames",
+            SideEffects::none, "ma_decoder_get_available_frames")->args({"decoder", "pAvailableFrames"});
         return true;
     }
     virtual ModuleAotType aotRequire ( TextWriter & tw ) const override {
