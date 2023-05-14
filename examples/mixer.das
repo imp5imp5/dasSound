@@ -5,8 +5,16 @@ require math
 require fio
 require rtti
 
-let MA_SAMPLE_RATE = 44100
+require daslib/array_boost
+
+// audio config
+let MA_SAMPLE_RATE = 48000
 let MA_CHANNELS = 2
+
+// limiter config
+let MA_LIMITER_THRESHOLD = 1.0
+let MA_LIMITER_ATTACK_TIME = 0.005
+let MA_LIMITER_RELEASE_TIME = 0.100
 
 class AudioSource
     bitrate : int = MA_SAMPLE_RATE  // samples per second
@@ -155,35 +163,58 @@ def remove_channel ( srci:int )
 def command_processor
     pass
 
+var g_limiter : ma_limiter
+var g_mix_buffer : array<float>
+
 def mixer ( var data:array<float>#; channels,rate:int; dt:float )
     let t0 = ref_time_ticks()
     command_processor()
-    let srct = g_channels |> length
-    for i in range(srct)
-        let srci = srct - i - 1
-        if !g_channels[srci]->mix(data,channels,rate,dt)
-            remove_channel(srci)
+    let output_samples = length(data)/channels
+    let input_samples = int(ma_limiter_get_required_input_frame_count(unsafe(addr(g_limiter)),uint64(output_samples)))
+    let current_samples = length(g_mix_buffer)/channels
+    let missing_samples = input_samples - current_samples
+    g_mix_buffer |> resize(input_samples*channels)
+    array_view(g_mix_buffer, current_samples * channels, missing_samples * channels) <| $ ( mix_data )
+        let srct = g_channels |> length
+        for i in range(srct)
+            let srci = srct - i - 1
+            if !g_channels[srci]->mix(mix_data,channels,rate,dt)
+                remove_channel(srci)
+    ma_limiter_process_pcm_frames(unsafe(addr(g_limiter)),
+        unsafe(addr(g_mix_buffer[0])),
+        unsafe(addr(data[0])),
+        uint64(output_samples))
+    g_mix_buffer |> erase(0, output_samples * channels)
     g_mixer_total_time += double(get_time_usec(t0)) / 1000.lf
     g_mixer_total_samples += uint64(length(data)/channels)
 
 [init]
 def initialize_mixer
     if this_context().category.audio
+        ma_limiter_init(unsafe(addr(g_limiter)),
+            MA_LIMITER_THRESHOLD,
+            MA_LIMITER_ATTACK_TIME,
+            MA_LIMITER_RELEASE_TIME,
+            float(MA_SAMPLE_RATE),
+            uint(MA_CHANNELS))
+
         static_if false
             let factor = 8  // testing generator
-            var monoGen = new AudioSourceMonoGenerator(gen_sine_wave(440.,44100/factor),44100/factor)
+            var monoGen = new AudioSourceMonoGenerator(gen_sine_wave(440.,MA_SAMPLE_RATE/factor),MA_SAMPLE_RATE/factor)
             var channel = new AudioChannel(monoGen)
             g_channels |> push(channel)
         static_if true
-            var channel = new AudioChannel(new AudioSourceDecoderFromFile("test.mp3",44100,2))
+            var channel = new AudioChannel(new AudioSourceDecoderFromFile("test.mp3",MA_SAMPLE_RATE,2))
             g_channels |> push(channel)
         static_if true
-            var channel = new AudioChannel(new AudioSourceDecoderFromFile("test.wav",44100,2))
+            var channel = new AudioChannel(new AudioSourceDecoderFromFile("test.wav",MA_SAMPLE_RATE,2))
             g_channels |> push(channel)
 
 [finalize]
 def finalize_mixer
     if this_context().category.audio
+        ma_limiter_uninit(unsafe(addr(g_limiter)))
+        delete g_mix_buffer
         let SPEED = g_mixer_total_time / double(g_mixer_total_samples)
         let SPEED_OF_LIGHT = 1000.lf / 48000.lf
         let UTILIZATION = int(SPEED / SPEED_OF_LIGHT * 1000.lf)

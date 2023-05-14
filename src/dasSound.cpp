@@ -30,6 +30,8 @@ MAKE_TYPE_FACTORY(ma_volume_mixer,ma_volume_mixer);
 MAKE_TYPE_FACTORY(ma_decoder_config,ma_decoder_config);
 MAKE_TYPE_FACTORY(ma_decoder,ma_decoder);
 
+MAKE_TYPE_FACTORY(ma_limiter,ma_limiter);
+
 DAS_BASE_BIND_ENUM ( ma_format, ma_format, \
     ma_format_unknown, \
     ma_format_u8, \
@@ -204,7 +206,17 @@ struct MADecoderAnnotation : ManagedStructureAnnotation<ma_decoder> {
     }
 };
 
-
+struct MALimiterAnnotation : ManagedStructureAnnotation<ma_limiter> {
+    MALimiterAnnotation ( ModuleLibrary & mlib )
+        : ManagedStructureAnnotation("ma_limiter", mlib, "ma_limiter") {
+        addField<DAS_BIND_MANAGED_FIELD(gain)>("gain","gain");
+        addField<DAS_BIND_MANAGED_FIELD(nChannels)>("nChannels","nChannels");
+        addField<DAS_BIND_MANAGED_FIELD(attack_samples)>("attack_samples","attack_samples");
+        addField<DAS_BIND_MANAGED_FIELD(threshold)>("threshold","threshold");
+        addField<DAS_BIND_MANAGED_FIELD(attack_coeff)>("attack_coeff","attack_coeff");
+        addField<DAS_BIND_MANAGED_FIELD(release_coeff)>("release_coeff","release_coeff");
+    }
+};
 
 class Module_Sound : public das::Module {
 protected:
@@ -319,6 +331,16 @@ public:
             SideEffects::modifyArgument, "ma_decoder_seek_to_pcm_frame")->args({"decoder", "frameIndex"});
         addExtern<DAS_BIND_FUN(ma_decoder_get_available_frames)>(*this, lib, "ma_decoder_get_available_frames",
             SideEffects::none, "ma_decoder_get_available_frames")->args({"decoder", "pAvailableFrames"});
+        // limiter
+        addAnnotation(make_smart<MALimiterAnnotation>(lib));
+        addExtern<DAS_BIND_FUN(ma_limiter_init)>(*this, lib, "ma_limiter_init",
+            SideEffects::modifyArgument, "ma_limiter_init")->args({"limiter", "threshold", "attack_time", "release_time", "sample_rate", "nChannels"});
+        addExtern<DAS_BIND_FUN(ma_limiter_process_pcm_frames)>(*this, lib, "ma_limiter_process_pcm_frames",
+            SideEffects::modifyArgument, "ma_limiter_process_pcm_frames")->args({"limiter", "InFames", "OutFrames", "nFrames"});
+        addExtern<DAS_BIND_FUN(ma_limiter_get_required_input_frame_count)>(*this, lib, "ma_limiter_get_required_input_frame_count",
+            SideEffects::none, "ma_limiter_get_required_input_frame_count")->args({"limiter", "out_len"});
+        addExtern<DAS_BIND_FUN(ma_limiter_uninit)>(*this, lib, "ma_limiter_uninit",
+            SideEffects::modifyArgument, "ma_limiter_uninit")->args({"limiter"});
         return true;
     }
     virtual ModuleAotType aotRequire ( TextWriter & tw ) const override {
