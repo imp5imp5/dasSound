@@ -135,25 +135,33 @@ class AudioSourceMonoGenerator : AudioSource
 let MA_RESULT_OK = 0
 
 class AudioSourceDecoder : AudioSource
-    decoder : ma_decoder
+    decoder : ma_decoder?
     isReady : bool = false
     def AudioSourceDecoder
         pass
-    def initFromFile ( filename:string; rate,channels:int )
+    def initFromFile ( filename:string; rate,nChannels:int )
+        decoder = new ma_decoder
         var config <- ma_decoder_config_init(ma_format ma_format_f32, uint(channels), uint(rate))
-        let result = ma_decoder_init_file(filename, unsafe(addr(config)), unsafe(addr(decoder)))
+        let result = ma_decoder_init_file(filename, unsafe(addr(config)), decoder)
         if result == MA_RESULT_OK
-            isReady = true
+            initFromDecoder(decoder, rate, nChannels)
+    def initFromDecoder ( dec:ma_decoder?; rate,nChannels:int )
+        bitrate = rate
+        channels = nChannels
+        decoder = dec
+        isReady = true
     def finalize
         if isReady
-            ma_decoder_uninit(unsafe(addr(decoder)))
+            ma_decoder_uninit(decoder)
+        unsafe
+            delete decoder
     def override ready : bool
         return isReady
     def override get_samples ( nsamples:int ) : array<float>
         var samples : array<float>
-        samples |> resize(nsamples)
+        samples |> resize(nsamples * channels)
         let nframes = ma_decoder_read_pcm_frames(
-            unsafe(addr(decoder)),
+            decoder,
             unsafe(addr(samples[0])),
             uint64(nsamples))
         return <- samples
@@ -165,7 +173,7 @@ def remove_channel ( srci:int )
 
 variant AudioCommand
     shutdown    : bool
-    add_decoder : tuple<filename:string;rate:int;nChannels:int>
+    add_decoder : tuple<decoder:ma_decoder?; rate:int; channels:int>
 
 var g_command_channel : Channel?
 
@@ -180,11 +188,12 @@ def command_processor
     for _ in range(nCmd)
         g_command_channel |> pop_one <| $ ( cmd:AudioCommand# )
             if cmd is shutdown
+                delete g_channels
                 g_command_channel |> notify_and_release
             elif cmd is add_decoder
                 var dcmd = cmd as add_decoder
                 var decoder  = new AudioSourceDecoder()
-                decoder->initFromFile(string(dcmd.filename),dcmd.rate,dcmd.nChannels)
+                decoder->initFromDecoder(unsafe(reinterpret<ma_decoder?> dcmd.decoder),dcmd.rate,dcmd.channels)
                 var channel = new AudioChannel(decoder)
                 g_channels |> push(channel)
 
@@ -259,7 +268,13 @@ def gen_sine_wave ( freq:float; rate:int )
         return false
 
 def play_sound_from_file ( filename:string; rate,channels:int )
-    g_command_channel |> push_clone <| [[AudioCommand add_decoder=[[auto filename, rate, channels]]]]
+    //! plays sound from file
+    //! note - this function is blocking for the duration of the decoder creation
+    var decoder = new ma_decoder
+    var config <- ma_decoder_config_init(ma_format ma_format_f32, uint(channels), uint(rate))
+    let result = ma_decoder_init_file(filename, unsafe(addr(config)), decoder)
+    if result == MA_RESULT_OK
+        g_command_channel |> push_clone <| [[AudioCommand add_decoder=[[auto decoder, rate, channels]]]]
 
 [export]
 def main
