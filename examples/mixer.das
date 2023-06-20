@@ -4,8 +4,11 @@ require sound
 require math
 require fio
 require rtti
+require debugapi
 
 require daslib/array_boost
+require daslib/jobque_boost
+require daslib/apply_in_context
 
 // audio config
 let MA_SAMPLE_RATE = 48000
@@ -131,28 +134,28 @@ class AudioSourceMonoGenerator : AudioSource
 
 let MA_RESULT_OK = 0
 
-class AudioSourceDecoderFromFile : AudioSource
+class AudioSourceDecoder : AudioSource
     decoder : ma_decoder
     isReady : bool = false
-    def AudioSourceDecoderFromFile ( filename:string; rate,channels:int)
+    def AudioSourceDecoder
+        pass
+    def initFromFile ( filename:string; rate,channels:int )
         var config <- ma_decoder_config_init(ma_format ma_format_f32, uint(channels), uint(rate))
         let result = ma_decoder_init_file(filename, unsafe(addr(config)), unsafe(addr(decoder)))
         if result == MA_RESULT_OK
             isReady = true
-        else
-            to_log(LOG_ERROR, "failed to load audio file {filename} with error code {result}\n")
     def finalize
-        ma_decoder_uninit(unsafe(addr(decoder)))
+        if isReady
+            ma_decoder_uninit(unsafe(addr(decoder)))
     def override ready : bool
         return isReady
     def override get_samples ( nsamples:int ) : array<float>
         var samples : array<float>
-        if isReady
-            samples |> resize(nsamples)
-            let nframes = ma_decoder_read_pcm_frames(
-                unsafe(addr(decoder)),
-                unsafe(addr(samples[0])),
-                uint64(nsamples))
+        samples |> resize(nsamples)
+        let nframes = ma_decoder_read_pcm_frames(
+            unsafe(addr(decoder)),
+            unsafe(addr(samples[0])),
+            uint64(nsamples))
         return <- samples
 
 def remove_channel ( srci:int )
@@ -160,12 +163,35 @@ def remove_channel ( srci:int )
         delete g_channels[srci]
     g_channels |> erase(srci)
 
+variant AudioCommand
+    shutdown    : bool
+    add_decoder : tuple<filename:string;rate:int;nChannels:int>
+
+var g_command_channel : Channel?
+
+[pinvoke, export]
+def setup_command_processor ( ch:Channel? )
+    g_command_channel = ch
+    g_command_channel |> add_ref
+
 def command_processor
-    pass
+    return if g_command_channel==null
+    let nCmd = g_command_channel.total
+    for _ in range(nCmd)
+        g_command_channel |> pop_one <| $ ( cmd:AudioCommand# )
+            if cmd is shutdown
+                g_command_channel |> notify_and_release
+            elif cmd is add_decoder
+                var dcmd = cmd as add_decoder
+                var decoder  = new AudioSourceDecoder()
+                decoder->initFromFile(string(dcmd.filename),dcmd.rate,dcmd.nChannels)
+                var channel = new AudioChannel(decoder)
+                g_channels |> push(channel)
 
 var g_limiter : ma_limiter
 var g_mix_buffer : array<float>
 
+[export]
 def mixer ( var data:array<float>#; channels,rate:int; dt:float )
     let t0 = ref_time_ticks()
     command_processor()
@@ -173,6 +199,8 @@ def mixer ( var data:array<float>#; channels,rate:int; dt:float )
     let input_samples = int(ma_limiter_get_required_input_frame_count(unsafe(addr(g_limiter)),uint64(output_samples)))
     let current_samples = length(g_mix_buffer)/channels
     let missing_samples = input_samples - current_samples
+    if missing_samples < 0
+        panic("{input_samples} - {current_samples}, need {output_samples}; mixer: missing_samples < 0")
     g_mix_buffer |> resize(input_samples*channels)
     array_view(g_mix_buffer, current_samples * channels, missing_samples * channels) <| $ ( mix_data )
         let srct = g_channels |> length
@@ -191,24 +219,13 @@ def mixer ( var data:array<float>#; channels,rate:int; dt:float )
 [init]
 def initialize_mixer
     if this_context().category.audio
+        this_context().name := "audio_mixer"
         ma_limiter_init(unsafe(addr(g_limiter)),
             MA_LIMITER_THRESHOLD,
             MA_LIMITER_ATTACK_TIME,
             MA_LIMITER_RELEASE_TIME,
             float(MA_SAMPLE_RATE),
             uint(MA_CHANNELS))
-
-        static_if false
-            let factor = 8  // testing generator
-            var monoGen = new AudioSourceMonoGenerator(gen_sine_wave(440.,MA_SAMPLE_RATE/factor),MA_SAMPLE_RATE/factor)
-            var channel = new AudioChannel(monoGen)
-            g_channels |> push(channel)
-        static_if true
-            var channel = new AudioChannel(new AudioSourceDecoderFromFile("test.mp3",MA_SAMPLE_RATE,2))
-            g_channels |> push(channel)
-        static_if true
-            var channel = new AudioChannel(new AudioSourceDecoderFromFile("test.wav",MA_SAMPLE_RATE,2))
-            g_channels |> push(channel)
 
 [finalize]
 def finalize_mixer
@@ -220,6 +237,18 @@ def finalize_mixer
         let UTILIZATION = int(SPEED / SPEED_OF_LIGHT * 1000.lf)
         to_log(LOG_INFO, "mixer {UTILIZATION/10}.{UTILIZATION%10}% utilization\n")
 
+def with_audio_system ( blk:block )
+    sound_initalize(@@mixer,MA_SAMPLE_RATE,MA_CHANNELS,this_context())
+    with_channel(1) <| $ ( channel )
+        g_command_channel = channel
+        unsafe
+            invoke_in_context(mixer_context(),"setup_command_processor",channel)
+        invoke(blk)
+        channel |> push_clone <| [[AudioCommand shutdown=true]]
+        g_command_channel = null
+        channel |> join
+    sound_finalize()
+
 def gen_sine_wave ( freq:float; rate:int )
     return <- generator<float> () <|
         var t = 0.
@@ -229,8 +258,16 @@ def gen_sine_wave ( freq:float; rate:int )
             t = (t + dt) % 1.
         return false
 
+def play_sound_from_file ( filename:string; rate,channels:int )
+    g_command_channel |> push_clone <| [[AudioCommand add_decoder=[[auto filename, rate, channels]]]]
+
 [export]
 def main
-    sound_initalize(@@mixer,MA_SAMPLE_RATE,MA_CHANNELS,this_context())
-    sleep(3000u)
-    sound_finalize()
+    with_audio_system <|
+        sleep(100u)
+        play_sound_from_file("{get_das_root()}/modules/dasSound/examples/test.mp3", MA_SAMPLE_RATE, 2)
+        sleep(3000u)
+
+
+
+
