@@ -19,6 +19,8 @@ let MA_LIMITER_THRESHOLD = 1.0
 let MA_LIMITER_ATTACK_TIME = 0.005
 let MA_LIMITER_RELEASE_TIME = 0.100
 
+typedef SID = uint64
+
 class AudioSource
     bitrate : int = MA_SAMPLE_RATE  // samples per second
     channels : int = 1              // 1 or 2
@@ -27,7 +29,9 @@ class AudioSource
     def abstract get_samples ( nsamples:int ) : array<float>
 
 class AudioChannel
+    sid    : SID = 0ul
     paused : bool = false
+    stop   : bool = false
     pitch  : float = 1.
     source : AudioSource?
     resampler : ma_resampler
@@ -66,11 +70,17 @@ class AudioChannel
     def mix ( var data:array<float>#; channels,rate:int; dt:float ) : bool
         if paused || !source->ready()
             return true
+        if stop && volume_mixer.volume==0.
+            print("stop with volume 0\n")
+            return false
         let inputRate = uint(float(source.bitrate) * pitch)
         ma_resampler_set_rate(unsafe(addr(resampler)), inputRate, uint(rate))
         var outputSamples = uint64(data|>length/channels)
         var inputSamples = ma_resampler_get_required_input_frame_count(unsafe(addr(resampler)), outputSamples)
         var samples <- source->get_samples(int(inputSamples))
+        if length(samples)==0
+            print("eos\n")
+            return false    // reached end of stream
         if length(samples) < int(inputSamples)
             samples |> resize(int(inputSamples))
         if inputSamples != outputSamples
@@ -114,6 +124,7 @@ class AudioChannel3D : AudioChannel
     attenuation : float
 
 var g_channels : array<AudioChannel?>
+var g_sid_2_channel : table<uint64; AudioChannel?>
 var g_mixer_total_time = 0.lf
 var g_mixer_total_samples = 0ul
 
@@ -164,16 +175,23 @@ class AudioSourceDecoder : AudioSource
             decoder,
             unsafe(addr(samples[0])),
             uint64(nsamples))
+        samples |> resize(int(nframes))
         return <- samples
 
 def remove_channel ( srci:int )
+    let sid = g_channels[srci].sid
+    if sid != 0ul
+        g_sid_2_channel |> erase(sid)
     unsafe
         delete g_channels[srci]
     g_channels |> erase(srci)
 
 variant AudioCommand
     shutdown    : bool
-    add_decoder : tuple<decoder:ma_decoder?; rate:int; channels:int>
+    add_decoder : tuple<sid:uint64; decoder:ma_decoder?; rate:int; channels:int>
+    pause       : tuple<sid:uint64; paused:bool>
+    volume      : tuple<sid:uint64; volume:float; time:float>
+    stop        : tuple<sid:uint64; time:float>
 
 var g_command_channel : Channel?
 
@@ -196,6 +214,33 @@ def command_processor
                 decoder->initFromDecoder(unsafe(reinterpret<ma_decoder?> dcmd.decoder),dcmd.rate,dcmd.channels)
                 var channel = new AudioChannel(decoder)
                 g_channels |> push(channel)
+                if dcmd.sid != 0ul
+                    channel.sid = dcmd.sid
+                    g_sid_2_channel[dcmd.sid] = channel
+            elif cmd is pause
+                var pcmd = cmd as pause
+                g_sid_2_channel |> get(pcmd.sid) <| $ ( var ch:AudioChannel?& )
+                    ch.paused = pcmd.paused
+            elif cmd is volume
+                var vcmd = cmd as volume
+                g_sid_2_channel |> get(vcmd.sid) <| $ ( var ch:AudioChannel?& )
+                    if vcmd.time > 0.
+                        let nFrames = uint64(vcmd.time * float(MA_SAMPLE_RATE))
+                        ma_volume_mixer_set_volume_over_time(unsafe(addr(ch.volume_mixer)), vcmd.volume, nFrames)
+                    else
+                        ma_volume_mixer_set_volume(unsafe(addr(ch.volume_mixer)), vcmd.volume)
+            elif cmd is stop
+                var scmd = cmd as stop
+                g_sid_2_channel |> get(scmd.sid) <| $ ( var ch:AudioChannel?& )
+                    if scmd.time > 0.
+                        let nFrames = uint64(scmd.time * float(MA_SAMPLE_RATE))
+                        ma_volume_mixer_set_volume_over_time(unsafe(addr(ch.volume_mixer)), 0., nFrames)
+                        ch.stop = true
+                    else
+                        ma_volume_mixer_set_volume(unsafe(addr(ch.volume_mixer)), 0.)
+                        ch.stop = true
+            else
+                panic("unknown audio command")
 
 var g_limiter : ma_limiter
 var g_mix_buffer : array<float>
@@ -267,21 +312,60 @@ def gen_sine_wave ( freq:float; rate:int )
             t = (t + dt) % 1.
         return false
 
-def play_sound_from_file ( filename:string; rate,channels:int )
+var private g_sound_sid = 1ul
+
+def private generate_sid
+    //! generate unique ID for sound
+    return g_sound_sid ++
+
+def public play_sound_from_file ( filename:string; rate,channels:int )
     //! plays sound from file
     //! note - this function is blocking for the duration of the decoder creation
     var decoder = new ma_decoder
     var config <- ma_decoder_config_init(ma_format ma_format_f32, uint(channels), uint(rate))
     let result = ma_decoder_init_file(filename, unsafe(addr(config)), decoder)
-    if result == MA_RESULT_OK
-        g_command_channel |> push_clone <| [[AudioCommand add_decoder=[[auto decoder, rate, channels]]]]
+    if result != MA_RESULT_OK
+        return 0ul
+    let sid = generate_sid()
+    g_command_channel |> push_clone <| [[AudioCommand add_decoder=[[auto sid, decoder, rate, channels]]]]
+    return sid
+
+def public set_pause ( sid:SID; paused:bool )
+    //! pause or unpause sound
+    g_command_channel |> push_clone <| [[AudioCommand pause=[[auto sid, paused]]]]
+
+def public set_volume ( sid:SID; volume:float; time:float = 0.0f )
+    //! set volume of sound
+    g_command_channel |> push_clone <| [[AudioCommand volume=[[auto sid, volume, time]]]]
+
+def public stop ( sid:SID; time:float = 0.0f )
+    //! stop sound
+    g_command_channel |> push_clone <| [[AudioCommand stop=[[auto sid, time]]]]
 
 [export]
 def main
     with_audio_system <|
         sleep(100u)
-        play_sound_from_file("{get_das_root()}/modules/dasSound/examples/test.mp3", MA_SAMPLE_RATE, 2)
-        sleep(3000u)
+        print("play\n")
+        let sid = play_sound_from_file("{get_das_root()}/modules/dasSound/examples/test.mp3", MA_SAMPLE_RATE, 2)
+        sleep(2000u)
+        print("set volume 0.5\n")
+        sid |> set_volume(0.5)
+        sleep(1000u)
+        print("set volume 1.0\n")
+        sid |> set_volume(1.0, 1.0)
+        sleep(2000u)
+        print("pause\n")
+        sid |> set_pause(true)
+        sleep(1000u)
+        print("unpause\n")
+        sid |> set_pause(false)
+        sid |> set_volume(0.25, 1.0)
+        sleep(1000u)
+        print("stop\n")
+        sid |> stop(0.5)
+        sleep(1000u)
+        print("done\n")
 
 
 
