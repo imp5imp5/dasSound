@@ -27,6 +27,7 @@ class AudioSource
     def ready : bool
         return true
     def abstract get_samples ( nsamples:int ) : array<float>
+    def abstract append ( var data : array<float> ) : bool
 
 class AudioChannel
     sid    : SID = 0ul
@@ -128,19 +129,30 @@ var g_sid_2_channel : table<uint64; AudioChannel?>
 var g_mixer_total_time = 0.lf
 var g_mixer_total_samples = 0ul
 
-class AudioSourceMonoGenerator : AudioSource
-    gen : iterator<float>
-    def AudioSourceMonoGenerator ( var g:iterator<float>; rate:int )
+class AudioSourcePCM : AudioSource
+    samples : array<float>
+    def AudioSourcePCM ( ch,rate:int; var smp:array<float> )
         bitrate = rate
-        gen <- g
+        channels = ch
+        samples <- smp
+    def override append ( var data : array<float> ) : bool
+        let ofs = length(samples)
+        let nsmp = length(data)
+        samples |> resize(ofs+nsmp)
+        unsafe
+            memcpy ( unsafe(addr(samples[ofs])), unsafe(addr(data[0])), nsmp * 4 )
+        delete data
+        return true
+    def finalize
+        delete samples
     def override get_samples ( nsamples:int ) : array<float>
-        var f : float
-        var i : int
+        let nsmp = min(length(samples), nsamples * channels)
         var data : array<float>
-        data |> reserve(nsamples)
-        while gen|>next(f) && i<nsamples
-            data |> push(f)
-            i ++
+        if nsmp!=0
+            data |> resize(nsmp)
+            unsafe
+                memcpy ( unsafe(addr(data[0])), unsafe(addr(samples[0])), nsmp * 4 )
+            samples |> erase(0,nsmp)
         return <- data
 
 let MA_RESULT_OK = 0
@@ -177,6 +189,8 @@ class AudioSourceDecoder : AudioSource
             uint64(nsamples))
         samples |> resize(int(nframes))
         return <- samples
+    def override append ( var data : array<float> ) : bool
+        return false
 
 def remove_channel ( srci:int )
     let sid = g_channels[srci].sid
@@ -189,6 +203,8 @@ def remove_channel ( srci:int )
 variant AudioCommand
     shutdown    : bool
     add_decoder : tuple<sid:uint64; decoder:ma_decoder?; rate:int; channels:int>
+    add_pcm     : tuple<sid:uint64; rate:int; channels:int; samples:array<float>>
+    append_pcm  : tuple<sid:uint64; samples:array<float>>
     pause       : tuple<sid:uint64; paused:bool>
     volume      : tuple<sid:uint64; volume:float; time:float>
     stop        : tuple<sid:uint64; time:float>
@@ -217,6 +233,18 @@ def command_processor
                 if dcmd.sid != 0ul
                     channel.sid = dcmd.sid
                     g_sid_2_channel[dcmd.sid] = channel
+            elif cmd is add_pcm
+                assume pcmd = cmd as add_pcm
+                var decoder  = new AudioSourcePCM(pcmd.channels, pcmd.rate, clone_to_move(pcmd.samples))
+                var channel = new AudioChannel(decoder)
+                g_channels |> push(channel)
+                if pcmd.sid != 0ul
+                    channel.sid = pcmd.sid
+                    g_sid_2_channel[pcmd.sid] = channel
+            elif cmd is append_pcm
+                assume pcmd = cmd as append_pcm
+                g_sid_2_channel |> get(pcmd.sid) <| $ ( var ch:AudioChannel?& )
+                    ch.source->append(clone_to_move(pcmd.samples))
             elif cmd is pause
                 var pcmd = cmd as pause
                 g_sid_2_channel |> get(pcmd.sid) <| $ ( var ch:AudioChannel?& )
@@ -303,15 +331,6 @@ def with_audio_system ( blk:block )
         channel |> join
     sound_finalize()
 
-def gen_sine_wave ( freq:float; rate:int )
-    return <- generator<float> () <|
-        var t = 0.
-        var dt = freq / float(rate)
-        while true
-            yield sin(t * (2.*PI))
-            t = (t + dt) % 1.
-        return false
-
 var private g_sound_sid = 1ul
 
 def private generate_sid
@@ -330,6 +349,16 @@ def public play_sound_from_file ( filename:string; rate,channels:int )
     g_command_channel |> push_clone <| [[AudioCommand add_decoder=[[auto sid, decoder, rate, channels]]]]
     return sid
 
+def public play_sound_from_pcm ( rate,channels:int; var samples:array<float> )
+    //! plays sound from PCM data
+    var sid = generate_sid()
+    g_command_channel |> push_clone <| [[AudioCommand add_pcm<-[[auto sid, rate, channels, samples]]]]
+    return sid
+
+def public append_to_pcm ( sid:uint64; var samples:array<float> )
+    //! append samples to PCM stream
+    g_command_channel |> push_clone <| [[AudioCommand append_pcm<-[[auto sid, samples]]]]
+
 def public set_pause ( sid:SID; paused:bool )
     //! pause or unpause sound
     g_command_channel |> push_clone <| [[AudioCommand pause=[[auto sid, paused]]]]
@@ -345,7 +374,15 @@ def public stop ( sid:SID; time:float = 0.0f )
 [export]
 def main
     with_audio_system <|
-        sleep(100u)
+        print("play sin-440\n")
+        var sin1 <- [{for x in range(MA_SAMPLE_RATE); sin(2.*PI*440.*float(x)/float(48000))}]
+        let sid_pcm = play_sound_from_pcm(MA_SAMPLE_RATE,1,sin1)
+        sid_pcm |> set_volume(0.25)
+        sleep(500u)
+        print("gen and append sin-880\n")
+        var sin2 <- [{for x in range(MA_SAMPLE_RATE); sin(2.*PI*880.*float(x)/float(48000))}]
+        sid_pcm |> append_to_pcm(sin2)
+        sleep(1500u)
         print("play\n")
         let sid = play_sound_from_file("{get_das_root()}/modules/dasSound/examples/test.mp3", MA_SAMPLE_RATE, 2)
         sleep(2000u)
@@ -366,7 +403,3 @@ def main
         sid |> stop(0.5)
         sleep(1000u)
         print("done\n")
-
-
-
-
